@@ -1,4 +1,4 @@
-# MamaCare — Telegram Maternal Health Bot
+# Materna — Telegram Maternal Health Bot
 
 A Telegram bot providing 24/7 evidence-based maternal health support: pregnancy guidance, antenatal/postnatal care, breastfeeding and newborn care, nutrition, danger-sign awareness, maternal mental health, and appointment/medication/supplement reminders. AI answers are generated via Groq (falling back to Nvidia NIM).
 
@@ -37,7 +37,7 @@ The bot uses long-polling (`bot.start()` from grammY), so no webhook setup is ne
 
 - Conversational Q&A restricted to maternal/newborn health topics (off-topic questions are politely redirected)
 - Danger-sign keyword detection that prepends an urgent care notice to relevant answers
-- In-memory reminders via `/remind <time> <note>` (e.g. `/remind 2h Take my prenatal vitamin`), `/reminders`, `/cancelreminder <id>` — reminders are lost on restart since there is no database
+- Natural-language reminders: users can just say things like "remind me tomorrow at 9am to take my prenatal vitamin" and the AI (via `parseReminderIntent` in `ai.js`) detects the intent and extracts the note/time — no command required. `/remind <time> <note>` (e.g. `/remind 2h Take my prenatal vitamin`), `/reminders`, `/cancelreminder <id>` also still work. Reminders are in-memory and lost on restart since there is no database
 - Photo/document messages are declined with a note that this bot is text-only
 
 ## User preferences
