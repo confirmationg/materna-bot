@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const { Bot } = require('grammy');
 const axios = require('axios');
-const { answerMaternalHealthQuestion } = require('./ai');
+const { answerMaternalHealthQuestion, parseReminderIntent } = require('./ai');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -50,9 +50,10 @@ function getReminders(chatId) {
   return chatReminders.get(chatId) || [];
 }
 
-function scheduleReminder(ctx, chatId, ms, note) {
+// Schedules a reminder to fire at an absolute timestamp (ms since epoch).
+function scheduleReminderAt(ctx, chatId, dueAt, note) {
   const id = reminderIdCounter++;
-  const dueAt = Date.now() + ms;
+  const ms = Math.max(0, dueAt - Date.now());
   const timeout = setTimeout(async () => {
     const list = getReminders(chatId).filter((r) => r.id !== id);
     chatReminders.set(chatId, list);
@@ -73,6 +74,11 @@ function scheduleReminder(ctx, chatId, ms, note) {
   return id;
 }
 
+// Schedules a reminder a relative duration (ms) from now.
+function scheduleReminder(ctx, chatId, ms, note) {
+  return scheduleReminderAt(ctx, chatId, Date.now() + ms, note);
+}
+
 // Parses a duration string like "30m", "2h", "1d" into milliseconds. Returns null if invalid.
 function parseDuration(input) {
   const match = /^(\d+)\s*(m|min|mins|h|hr|hrs|hour|hours|d|day|days)$/i.exec(input.trim());
@@ -85,6 +91,67 @@ function parseDuration(input) {
   else multiplier = 24 * 60 * 60 * 1000;
   const ms = value * multiplier;
   return ms > 0 ? ms : null;
+}
+
+function formatDueAt(dueAt) {
+  return new Date(dueAt).toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+const REMINDER_HINT_REGEX = /\bremind(er|ers)?\b|don'?t\s*(let\s*me\s*)?forget|set\s*(a|an)\s*(reminder|alarm|alert)|alert\s*me|notify\s*me|ping\s*me/i;
+
+// Attempts to interpret free text as a natural-language reminder request using AI.
+// Returns true if the message was handled (reply already sent), false otherwise.
+async function tryHandleReminderIntent(ctx, chatId, text) {
+  let intent;
+  try {
+    intent = await parseReminderIntent(text);
+  } catch (err) {
+    console.error('Error parsing reminder intent:', err.message);
+    return false;
+  }
+
+  if (!intent || !intent.isReminder) return false;
+
+  if (!intent.datetime || intent.needsClarification) {
+    await ctx.reply(
+      `📅 I can set that reminder${intent.note && intent.note !== 'your reminder' ? ` for "${escapeHtml(intent.note)}"` : ''} — what date and time should I remind you? ` +
+        `For example: "tomorrow at 9am" or "in 2 hours".`,
+      { parse_mode: 'HTML' }
+    );
+    return true;
+  }
+
+  const dueAt = Date.parse(intent.datetime);
+  if (!dueAt || Number.isNaN(dueAt)) {
+    await ctx.reply(
+      "I couldn't work out the exact time for that. Could you rephrase it, e.g. \"remind me at 6pm today to take my vitamin\"?"
+    );
+    return true;
+  }
+
+  if (dueAt <= Date.now()) {
+    await ctx.reply('That time seems to already be in the past. Could you give me a future date/time for the reminder?');
+    return true;
+  }
+
+  if (getReminders(chatId).length >= MAX_REMINDERS_PER_CHAT) {
+    await ctx.reply('You have reached the maximum of 20 active reminders. Please cancel one before adding another (see /reminders).');
+    return true;
+  }
+
+  const note = intent.note || 'your reminder';
+  const id = scheduleReminderAt(ctx, chatId, dueAt, note);
+  await ctx.reply(
+    `✅ Reminder <b>#${id}</b> set: "${escapeHtml(note)}" for ${escapeHtml(formatDueAt(dueAt))}.`,
+    { parse_mode: 'HTML' }
+  );
+  return true;
 }
 
 // ── Danger sign detection ───────────────────────────────────────────────────
@@ -119,9 +186,9 @@ function buildGreeting(firstName) {
 }
 
 const OFFTOPIC_REPLY =
-  '🤰 I am MamaCare, your maternal health assistant. ' +
+  '🤰 I am Materna, your maternal health assistant. ' +
   'I can help with pregnancy, antenatal/postnatal care, breastfeeding, newborn care, nutrition, danger signs, and maternal mental health — but not with topics outside those areas.\n\n' +
-  'Try asking about pregnancy symptoms, prenatal nutrition, breastfeeding tips, or how to set a reminder with /remind!';
+  'Try asking about pregnancy symptoms, prenatal nutrition, breastfeeding tips, or just tell me naturally when you want to be reminded about something!';
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
@@ -132,11 +199,12 @@ bot.command('start', (ctx) => {
 
 bot.command('help', (ctx) =>
   ctx.reply(
-    'Here is what MamaCare can do for you:\n\n' +
+    'Here is what Materna can do for you:\n\n' +
       '🤰 Ask about pregnancy, antenatal/postnatal care, breastfeeding, newborn care, or nutrition — just type your question\n' +
       '⚠️ Describe a symptom and I will let you know if it could be a danger sign that needs urgent care\n' +
       '🧠 Ask about maternal mental health — stress, baby blues, postpartum depression\n' +
-      '📅 /remind <time> <note> → set a reminder, e.g. /remind 2h Take my prenatal vitamin\n' +
+      '📅 Just tell me naturally when to remind you, e.g. "remind me tomorrow at 9am to take my prenatal vitamin" or "remind me in 2 hours to drink water" — no command needed\n' +
+      '📅 Or use /remind <time> <note> → e.g. /remind 2h Take my prenatal vitamin\n' +
       '📋 /reminders → see your upcoming reminders\n' +
       '❌ /cancelreminder <id> → cancel a reminder\n\n' +
       'I provide educational information only — not a substitute for professional medical advice. ' +
@@ -155,7 +223,7 @@ bot.command('remind', async (ctx) => {
         '<code>/remind 2h Take my prenatal vitamin</code>\n' +
         '<code>/remind 30m Drink a glass of water</code>\n' +
         '<code>/remind 1d Antenatal appointment tomorrow</code>\n\n' +
-        'Supported units: m (minutes), h (hours), d (days).',
+        'Or just tell me naturally: "remind me tomorrow at 9am to take my prenatal vitamin".',
       { parse_mode: 'HTML' }
     );
   }
@@ -164,20 +232,25 @@ bot.command('remind', async (ctx) => {
   const note = rest.join(' ').trim();
   const ms = parseDuration(durationToken);
 
-  if (!ms || !note) {
+  if (ms && note) {
+    if (getReminders(chatId).length >= MAX_REMINDERS_PER_CHAT) {
+      return ctx.reply('You have reached the maximum of 20 active reminders. Please cancel one before adding another.');
+    }
+
+    const id = scheduleReminder(ctx, chatId, ms, note);
     return ctx.reply(
-      "I couldn't understand that. Use the format:\n<code>/remind 2h Take my prenatal vitamin</code>\n\nSupported units: m (minutes), h (hours), d (days).",
+      `✅ Reminder <b>#${id}</b> set: "${escapeHtml(note)}" in ${escapeHtml(durationToken)}.`,
       { parse_mode: 'HTML' }
     );
   }
 
-  if (getReminders(chatId).length >= MAX_REMINDERS_PER_CHAT) {
-    return ctx.reply('You have reached the maximum of 20 active reminders. Please cancel one before adding another.');
-  }
+  // Fallback: let the AI interpret natural language, e.g. "/remind take vitamin at 6pm"
+  await ctx.replyWithChatAction('typing');
+  const handled = await tryHandleReminderIntent(ctx, chatId, args);
+  if (handled) return;
 
-  const id = scheduleReminder(ctx, chatId, ms, note);
   return ctx.reply(
-    `✅ Reminder <b>#${id}</b> set: "${escapeHtml(note)}" in ${escapeHtml(durationToken)}.`,
+    "I couldn't understand that reminder. Try:\n<code>/remind 2h Take my prenatal vitamin</code>\n\nOr just tell me naturally: \"remind me tomorrow at 9am to take my iron tablet\".",
     { parse_mode: 'HTML' }
   );
 });
@@ -238,6 +311,12 @@ bot.on('message:text', async (ctx) => {
     return ctx.reply(buildGreeting(firstName), { parse_mode: 'HTML' });
   }
 
+  if (REMINDER_HINT_REGEX.test(text)) {
+    await ctx.replyWithChatAction('typing');
+    const handled = await tryHandleReminderIntent(ctx, chatId, text);
+    if (handled) return;
+  }
+
   const isDangerSign = DANGER_SIGN_REGEX.test(text);
 
   await ctx.replyWithChatAction('typing');
@@ -285,4 +364,4 @@ axios
   .catch((err) => console.warn('Could not clear webhook:', err.message));
 
 bot.start();
-console.log('✅ MamaCare maternal health bot is running.');
+console.log('✅ Materna maternal health bot is running.');
