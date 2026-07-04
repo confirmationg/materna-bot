@@ -1,5 +1,5 @@
 {
-  "name": "mamacare-telegram-bot",
+  "name": "materna-telegram-bot",
   "version": "1.0.0",
   "description": "Telegram bot providing 24/7 maternal health support (pregnancy, antenatal/postnatal care, breastfeeding, nutrition, danger signs, mental health, reminders) via Groq/Nvidia AI",
   "main": "index.js",
