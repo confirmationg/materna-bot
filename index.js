@@ -102,7 +102,7 @@ const GREETING_REGEX = /^(hi|hello|hey|howdy|hiya|good\s*(morning|afternoon|even
 
 function buildGreeting(firstName) {
   return (
-    `🤰 <b>Hello, ${escapeHtml(firstName)}! I'm MamaCare.</b>\n\n` +
+    `🤰 <b>Hello, ${escapeHtml(firstName)}! I'm Materna.</b>\n\n` +
     `I was built by <b>Godwin Obadiah</b>, a Fellow of the <b>3MTT Airtel NextGen Program</b> (Fellow ID: <b>FE/26/3092165155</b>), to make trustworthy maternal health support available to you anytime.\n\n` +
     `Here's how I can help:\n` +
     `🤰 Pregnancy guidance and education\n` +
