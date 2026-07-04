@@ -5,7 +5,7 @@ const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
 const NVIDIA_MODEL = process.env.NVIDIA_MODEL || 'meta/llama-3.1-70b-instruct';
 
-const MATERNAL_QA_SYSTEM_PROMPT = `You are MamaCare, a warm, trustworthy maternal health assistant available 24/7 on Telegram. You were built by Godwin Obadiah, a Fellow of the 3MTT Airtel NextGen Program (Fellow ID: FE/26/3092165155).
+const MATERNAL_QA_SYSTEM_PROMPT = `You are Materna, a warm, trustworthy maternal health assistant available 24/7 on Telegram. You were built by Godwin Obadiah, a Fellow of the 3MTT Airtel NextGen Program (Fellow ID: FE/26/3092165155).
 
 Your job is ONLY to answer questions in these subject areas:
 - Pregnancy guidance and education (trimesters, fetal development, common changes)
@@ -110,4 +110,50 @@ async function answerMaternalHealthQuestion(question, history = []) {
   return { text: result, offTopic: false };
 }
 
-module.exports = { answerMaternalHealthQuestion };
+const REMINDER_INTENT_SYSTEM_PROMPT = `You detect whether a Telegram message sent to Materna, a maternal health assistant, is a request to set a reminder (for an appointment, medication, or supplement), and if so extract the note and the exact date/time it should fire.
+
+The current date and time is: {NOW_ISO} ({NOW_HUMAN}).
+
+Respond with ONLY a compact JSON object, no other text, markdown, or explanation, matching exactly this shape:
+{"isReminder": boolean, "note": string|null, "datetime": string|null, "needsClarification": boolean}
+
+Rules:
+- isReminder is true only if the user is asking to be reminded/alerted/notified about something at a specific or relative time (e.g. "remind me to take my iron tablet at 8pm", "remind me tomorrow at 9am about my antenatal appointment", "don't let me forget my folic acid in 2 hours", "set a reminder for my checkup on Friday at 10am").
+- note is a short description of what to remind them about (do not include the time phrase itself). If no clear task is mentioned, use "your reminder".
+- datetime is an ISO 8601 date-time string (include the same UTC offset as the current time given above) representing when the reminder should fire, computed relative to the current date/time given above. Resolve relative phrases like "today", "tonight", "tomorrow", "in 2 hours", "next Monday", "this evening" (assume evening = 19:00, morning = 08:00, afternoon = 14:00, night = 21:00 if no exact time given) using the current date/time as the reference point.
+- If isReminder is true but you cannot confidently determine any date/time at all from the message, set datetime to null and needsClarification to true.
+- If the message is not a reminder request at all (e.g. a general health question, greeting, or unrelated text), isReminder is false, note and datetime are null, needsClarification is false.
+- Never output anything other than the JSON object.`;
+
+/**
+ * Detects whether a message is a natural-language reminder request and extracts
+ * the note + target datetime using the current date/time as reference.
+ * Returns { isReminder, note, datetime, needsClarification } or null if AI is unavailable/unparsable.
+ */
+async function parseReminderIntent(text, now = new Date()) {
+  const nowIso = now.toISOString();
+  const nowHuman = now.toUTCString();
+  const systemPrompt = REMINDER_INTENT_SYSTEM_PROMPT.replace('{NOW_ISO}', nowIso).replace('{NOW_HUMAN}', nowHuman);
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: text },
+  ];
+
+  const result = await callAI(messages, 200);
+  if (!result) return null;
+
+  const jsonMatch = result.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (typeof parsed.isReminder !== 'boolean') return null;
+    return parsed;
+  } catch (err) {
+    console.error('Failed to parse reminder intent JSON:', err.message);
+    return null;
+  }
+}
+
+module.exports = { answerMaternalHealthQuestion, parseReminderIntent };
