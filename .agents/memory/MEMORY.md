@@ -1,0 +1,1 @@
+- [MamaCare pivot from plant bot](mamacare-pivot.md) — this repo was repurposed from a plant-ID Telegram bot to a maternal health support bot; check before assuming plant/PlantNet features still exist.
