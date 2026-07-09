@@ -94,12 +94,14 @@ function parseDuration(input) {
 }
 
 function formatDueAt(dueAt) {
-  return new Date(dueAt).toLocaleString('en-US', {
+  return new Date(dueAt).toLocaleString('en-NG', {
+    timeZone: 'Africa/Lagos',
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    timeZoneName: 'short',
   });
 }
 
