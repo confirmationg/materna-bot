@@ -112,7 +112,8 @@ async function answerMaternalHealthQuestion(question, history = []) {
 
 const REMINDER_INTENT_SYSTEM_PROMPT = `You detect whether a Telegram message sent to Materna, a maternal health assistant, is a request to set a reminder (for an appointment, medication, or supplement), and if so extract the note and the exact date/time it should fire.
 
-The current date and time is: {NOW_ISO} ({NOW_HUMAN}).
+The current date and time in Nigeria (WAT, UTC+1) is: {NOW_ISO} ({NOW_HUMAN}).
+All times should be interpreted and output in Nigeria time (WAT, UTC+1).
 
 Respond with ONLY a compact JSON object, no other text, markdown, or explanation, matching exactly this shape:
 {"isReminder": boolean, "note": string|null, "datetime": string|null, "needsClarification": boolean}
@@ -120,7 +121,7 @@ Respond with ONLY a compact JSON object, no other text, markdown, or explanation
 Rules:
 - isReminder is true only if the user is asking to be reminded/alerted/notified about something at a specific or relative time (e.g. "remind me to take my iron tablet at 8pm", "remind me tomorrow at 9am about my antenatal appointment", "don't let me forget my folic acid in 2 hours", "set a reminder for my checkup on Friday at 10am").
 - note is a short description of what to remind them about (do not include the time phrase itself). If no clear task is mentioned, use "your reminder".
-- datetime is an ISO 8601 date-time string (include the same UTC offset as the current time given above) representing when the reminder should fire, computed relative to the current date/time given above. Resolve relative phrases like "today", "tonight", "tomorrow", "in 2 hours", "next Monday", "this evening" (assume evening = 19:00, morning = 08:00, afternoon = 14:00, night = 21:00 if no exact time given) using the current date/time as the reference point.
+- datetime is an ISO 8601 date-time string with the +01:00 offset (Nigeria WAT) representing when the reminder should fire, computed relative to the current Nigeria date/time given above. Resolve relative phrases like "today", "tonight", "tomorrow", "in 2 hours", "next Monday", "this evening" (assume evening = 19:00, morning = 08:00, afternoon = 14:00, night = 21:00 WAT if no exact time given) using the current Nigeria date/time as the reference point. Always include +01:00 in the datetime output.
 - If isReminder is true but you cannot confidently determine any date/time at all from the message, set datetime to null and needsClarification to true.
 - If the message is not a reminder request at all (e.g. a general health question, greeting, or unrelated text), isReminder is false, note and datetime are null, needsClarification is false.
 - Never output anything other than the JSON object.`;
@@ -130,9 +131,16 @@ Rules:
  * the note + target datetime using the current date/time as reference.
  * Returns { isReminder, note, datetime, needsClarification } or null if AI is unavailable/unparsable.
  */
+// Returns an ISO 8601 string for the given Date in Nigeria time (WAT, UTC+1) with +01:00 offset.
+function toNigeriaISO(date) {
+  const WAT_OFFSET_MS = 60 * 60 * 1000;
+  const local = new Date(date.getTime() + WAT_OFFSET_MS);
+  return local.toISOString().replace('Z', '+01:00');
+}
+
 async function parseReminderIntent(text, now = new Date()) {
-  const nowIso = now.toISOString();
-  const nowHuman = now.toUTCString();
+  const nowIso = toNigeriaISO(now);
+  const nowHuman = now.toLocaleString('en-NG', { timeZone: 'Africa/Lagos', dateStyle: 'full', timeStyle: 'medium' }) + ' WAT (Nigeria, UTC+1)';
   const systemPrompt = REMINDER_INTENT_SYSTEM_PROMPT.replace('{NOW_ISO}', nowIso).replace('{NOW_HUMAN}', nowHuman);
 
   const messages = [
