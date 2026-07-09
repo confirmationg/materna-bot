@@ -359,13 +359,29 @@ bot.catch((err) => {
   console.error('Bot error:', err);
 });
 
-// Clear any existing webhook, then wait 3 s before starting polling.
-// The delay lets Telegram drop the previous long-poll connection (30 s timeout)
-// so a fresh restart never triggers a 409 Conflict on getUpdates.
+// Clear any existing webhook so long polling works uninterrupted.
 axios
   .post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteWebhook`, { drop_pending_updates: false })
   .then(() => console.log('✅ Webhook cleared.'))
   .catch((err) => console.warn('Could not clear webhook:', err.message));
 
-setTimeout(() => bot.start(), 3000);
+// Use a 10-second polling timeout (instead of grammY's default 30 s) so that
+// when the process restarts, the old connection drops quickly.
+// On a 409 Conflict (another instance still holds the poll), wait 12 s and retry.
+async function startBotWithRetry(delayMs = 3000) {
+  await new Promise((r) => setTimeout(r, delayMs));
+  try {
+    await bot.start({ timeout: 10 });
+  } catch (err) {
+    if (err && err.error_code === 409) {
+      console.warn('⚠️ 409 Conflict — previous instance still polling. Retrying in 12 s…');
+      startBotWithRetry(12000);
+    } else {
+      console.error('Fatal bot error:', err);
+      process.exit(1);
+    }
+  }
+}
+
 console.log('✅ Materna maternal health bot is running.');
+startBotWithRetry();
